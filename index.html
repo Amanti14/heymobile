@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>hEY! Online Market</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo-badge">hEY!</div>
+  <div class="brand">hEY<span>!</span> Market</div>
+  <button class="icon-btn" onclick="openSearch()">🔍</button>
+  <button class="icon-btn" onclick="openCart()">🛒<span class="cart-badge" id="cartBadge" style="display:none">0</span></button>
+</div>
+
+<div class="hero">
+  <h2 id="heroTitle">Welcome to hEY! Market</h2>
+  <p id="heroSub">Consoles, phones, PCs & more — all in one place</p>
+</div>
+
+<div class="section-title">Categories</div>
+<div class="cat-row" id="catRow"></div>
+
+<div class="section-title" id="gridTitle">All Products</div>
+<div class="grid" id="grid"></div>
+
+<div class="bottombar">
+  <button class="cart-btn" onclick="openCart()">
+    <span id="cartSummary">Cart is empty</span>
+    <span>View Cart →</span>
+  </button>
+</div>
+
+<!-- Search overlay -->
+<div class="search-overlay" id="searchOverlay">
+  <div class="search-head">
+    <input class="search-input" id="searchInput" placeholder="Search products..." oninput="renderSearch()">
+    <button class="icon-btn" onclick="closeSearch()">✕</button>
+  </div>
+  <div class="search-results" id="searchResults"></div>
+</div>
+
+<!-- Product detail sheet -->
+<div class="sheet-overlay" id="sheetOverlay" onclick="closeSheet()"></div>
+<div class="sheet" id="sheet">
+  <div class="sheet-handle"></div>
+  <div id="sheetContent"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const tg = window.Telegram?.WebApp;
+tg?.ready(); tg?.expand();
+
+// ==== CONFIGURE THIS ====
+const API_BASE = "https://hey-market.amantifekede14.workers.dev/"; // e.g. https://hey-market.yourname.workers.dev
+// =========================
+
+let store = { categories: [], products: [], payment:{methods:[]}, shipping:{options:[]} };
+let cart = []; // [{productId, qty}]
+let activeCategory = "all";
+let currentProduct = null;
+
+async function loadStore(){
+  try{
+    const res = await fetch(`${API_BASE}/api/store`);
+    store = await res.json();
+    render();
+  }catch(e){ console.error(e); }
+}
+loadStore();
+setInterval(loadStore, 8000); // live sync, matches Vision Sportswear pattern
+
+function render(){
+  document.getElementById('heroTitle').textContent = store.store?.name || "hEY! Online Market";
+  document.getElementById('heroSub').textContent = store.store?.tagline || "";
+  renderCategories();
+  renderGrid();
+}
+
+function renderCategories(){
+  const row = document.getElementById('catRow');
+  const cats = [{id:'all', name:'All', icon:'🛍️'}, ...(store.categories||[])];
+  row.innerHTML = cats.map(c => `
+    <div class="cat-chip ${activeCategory===c.id?'active':''}" onclick="selectCategory('${c.id}')">
+      <div class="emoji">${c.icon||'🛍️'}</div>
+      <div class="label">${c.name}</div>
+    </div>`).join('');
+}
+
+function selectCategory(id){ activeCategory = id; render(); }
+
+function renderGrid(){
+  const grid = document.getElementById('grid');
+  const title = document.getElementById('gridTitle');
+  let items = store.products || [];
+  if(activeCategory !== 'all') items = items.filter(p => p.categoryId === activeCategory);
+  const catObj = (store.categories||[]).find(c=>c.id===activeCategory);
+  title.textContent = activeCategory==='all' ? 'All Products' : (catObj?.name || 'Products');
+
+  if(items.length === 0){
+    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">No products here yet.</div>`;
+    return;
+  }
+  grid.innerHTML = items.map(p => cardHtml(p)).join('');
+}
+
+function cardHtml(p){
+  const img = p.image ? `<img src="${p.image}" alt="${p.name}">` : `<div class="noimg">📦</div>`;
+  const stock = p.stock > 0 ? `${p.stock} in stock` : `<span class="out-of-stock">Out of stock</span>`;
+  return `<div class="card" onclick="openProduct('${p.id}')">
+    ${img}
+    <div class="card-body">
+      <div class="card-name">${p.name}</div>
+      <div class="card-price">${p.price} ETB</div>
+      <div class="card-stock">${stock}</div>
+    </div>
+  </div>`;
+}
+
+// ---- Product detail sheet ----
+let sheetQty = 1;
+function openProduct(id){
+  currentProduct = (store.products||[]).find(p=>p.id===id);
+  if(!currentProduct) return;
+  sheetQty = 1;
+  renderSheet();
+  document.getElementById('sheetOverlay').classList.add('open');
+  document.getElementById('sheet').classList.add('open');
+}
+function closeSheet(){
+  document.getElementById('sheetOverlay').classList.remove('open');
+  document.getElementById('sheet').classList.remove('open');
+}
+function renderSheet(){
+  const p = currentProduct;
+  const img = p.image ? `<img class="sheet-img" src="${p.image}">` : `<div class="sheet-img" style="display:flex;align-items:center;justify-content:center;font-size:48px;">📦</div>`;
+  const inStock = p.stock > 0;
+  document.getElementById('sheetContent').innerHTML = `
+    ${img}
+    <div class="sheet-body">
+      <div class="sheet-name">${p.name}</div>
+      <div class="sheet-price">${p.price} ETB</div>
+      <div class="sheet-desc">${p.description || ''}</div>
+      <div class="qty-row">
+        <button class="qty-btn" onclick="changeSheetQty(-1)">−</button>
+        <div class="qty-val" id="sheetQtyVal">${sheetQty}</div>
+        <button class="qty-btn" onclick="changeSheetQty(1)">+</button>
+        <div style="color:var(--text-soft);font-size:12.5px;margin-left:auto;">${inStock ? p.stock+' available' : 'Out of stock'}</div>
+      </div>
+      <button class="btn-primary" ${inStock?'':'disabled'} onclick="addToCart()">${inStock?'Add to Cart':'Out of Stock'}</button>
+    </div>`;
+}
+function changeSheetQty(d){
+  sheetQty = Math.max(1, Math.min(currentProduct.stock||99, sheetQty+d));
+  document.getElementById('sheetQtyVal').textContent = sheetQty;
+}
+function addToCart(){
+  const existing = cart.find(i=>i.productId===currentProduct.id);
+  if(existing) existing.qty += sheetQty;
+  else cart.push({productId: currentProduct.id, qty: sheetQty});
+  updateCartUI();
+  showToast('Added to cart');
+  closeSheet();
+}
+
+function updateCartUI(){
+  const count = cart.reduce((s,i)=>s+i.qty,0);
+  const badge = document.getElementById('cartBadge');
+  badge.style.display = count>0 ? 'flex' : 'none';
+  badge.textContent = count;
+  const total = cartTotal();
+  document.getElementById('cartSummary').textContent = count>0 ? `${count} item${count>1?'s':''} · ${total} ETB` : 'Cart is empty';
+}
+function cartTotal(){
+  return cart.reduce((sum,i)=>{
+    const p = store.products.find(x=>x.id===i.productId);
+    return sum + (p ? p.price*i.qty : 0);
+  },0);
+}
+
+// ---- Cart sheet ----
+function openCart(){
+  if(cart.length===0){ showToast('Your cart is empty'); return; }
+  currentProduct = null;
+  document.getElementById('sheetContent').innerHTML = cartHtml();
+  document.getElementById('sheetOverlay').classList.add('open');
+  document.getElementById('sheet').classList.add('open');
+}
+function cartHtml(){
+  const rows = cart.map(i=>{
+    const p = store.products.find(x=>x.id===i.productId);
+    if(!p) return '';
+    const img = p.image ? `<img src="${p.image}">` : `<div class="noimg">📦</div>`;
+    return `<div class="cart-item">
+      ${img}
+      <div class="cart-item-info">
+        <div class="cart-item-name">${p.name}</div>
+        <div class="cart-item-price">${p.price} ETB</div>
+      </div>
+      <div class="mini-qty">
+        <button onclick="changeCartQty('${p.id}',-1)">−</button>
+        <span>${i.qty}</span>
+        <button onclick="changeCartQty('${p.id}',1)">+</button>
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="sheet-body">
+    <div class="sheet-name" style="margin-bottom:12px;">Your Cart</div>
+    ${rows}
+    <div class="cart-total-row"><span>Total</span><span>${cartTotal()} ETB</span></div>
+    <button class="btn-primary" onclick="openCheckout()">Checkout</button>
+  </div>`;
+}
+function changeCartQty(productId, d){
+  const item = cart.find(i=>i.productId===productId);
+  if(!item) return;
+  item.qty += d;
+  if(item.qty<=0) cart = cart.filter(i=>i.productId!==productId);
+  updateCartUI();
+  openCart();
+}
+
+// ---- Checkout ----
+let selectedPayment = null;
+function openCheckout(){
+  selectedPayment = store.payment?.methods?.[0]?.id || null;
+  document.getElementById('sheetContent').innerHTML = checkoutHtml();
+}
+function checkoutHtml(){
+  const payOptions = (store.payment?.methods||[]).map(m => `
+    <div class="pay-option ${selectedPayment===m.id?'selected':''}" onclick="selectPayment('${m.id}')">
+      <div>
+        <div style="font-weight:600;font-size:13.5px;">${m.name}</div>
+        <div style="font-size:11.5px;color:var(--text-soft);">${m.details||''}</div>
+      </div>
+    </div>`).join('');
+  return `<div class="sheet-body">
+    <div class="sheet-name" style="margin-bottom:14px;">Checkout</div>
+    <div class="field"><label>Full Name</label><input id="ckName" placeholder="Your name"></div>
+    <div class="field"><label>Phone Number</label><input id="ckPhone" placeholder="09XXXXXXXX"></div>
+    <div class="field"><label>Payment Method</label>${payOptions}</div>
+    <div class="field"><label>Order Note (optional)</label><textarea id="ckNote" rows="2" placeholder="Delivery notes..."></textarea></div>
+    <div class="cart-total-row"><span>Total</span><span>${cartTotal()} ETB</span></div>
+    <button class="btn-primary" onclick="submitOrder()">Place Order</button>
+  </div>`;
+}
+function selectPayment(id){ selectedPayment = id; document.getElementById('sheetContent').innerHTML = checkoutHtml(); }
+
+async function submitOrder(){
+  const name = document.getElementById('ckName').value.trim();
+  const phone = document.getElementById('ckPhone').value.trim();
+  const note = document.getElementById('ckNote').value.trim();
+  if(!name || !phone){ showToast('Please fill in your name and phone'); return; }
+
+  const payload = {
+    initData: tg?.initData || '',
+    items: cart.map(i=>({productId:i.productId, qty:i.qty})),
+    customer: { name, phone },
+    paymentMethodId: selectedPayment,
+    note,
+  };
+  try{
+    const res = await fetch(`${API_BASE}/api/order`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    if(data.ok){
+      cart = [];
+      updateCartUI();
+      closeSheet();
+      showToast('Order placed! We will contact you shortly 🎉');
+      tg?.HapticFeedback?.notificationOccurred('success');
+    } else {
+      showToast(data.error || 'Could not place order');
+    }
+  }catch(e){
+    showToast('Network error — please try again');
+  }
+}
+
+// ---- Search ----
+function openSearch(){ document.getElementById('searchOverlay').classList.add('open'); document.getElementById('searchInput').focus(); }
+function closeSearch(){ document.getElementById('searchOverlay').classList.remove('open'); document.getElementById('searchInput').value=''; }
+function renderSearch(){
+  const q = document.getElementById('searchInput').value.trim().toLowerCase();
+  const results = document.getElementById('searchResults');
+  if(!q){ results.innerHTML=''; return; }
+  const matches = (store.products||[]).filter(p => p.name.toLowerCase().includes(q));
+  if(matches.length===0){ results.innerHTML = `<div class="empty-state">No products found</div>`; return; }
+  results.innerHTML = `<div class="grid" style="padding:0;">${matches.map(cardHtml).join('')}</div>`;
+}
+
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.display = 'block';
+  clearTimeout(window._toastTimer);
+  window._toastTimer = setTimeout(()=>{ t.style.display='none'; }, 2200);
+}
+</script>
+</body>
+</html>
