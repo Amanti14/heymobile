@@ -85,7 +85,9 @@ let currentProduct = null;
 
 const tgUser = tg?.initDataUnsafe?.user || null;
 let myProfile = null; // populated once the user logs in and opens their profile
-let authMode = null; // 'telegram' | 'guest' — set once, at the auth gate on first load
+let authMode = null; // 'telegram' | 'guest' — set once, at the auth gate, then remembered forever
+
+const AUTH_STORAGE_KEY = 'heyMarketAuthMode';
 
 // Reflect the chosen auth mode in the topbar icon: real Telegram avatar if logged in, generic icon if guest
 function applyAuthUI(){
@@ -105,16 +107,29 @@ function applyAuthUI(){
 
 function chooseLoginTelegram(){
   authMode = 'telegram';
+  try{ localStorage.setItem(AUTH_STORAGE_KEY, 'telegram'); }catch(e){}
   document.getElementById('authGate').classList.add('hidden');
   applyAuthUI();
 }
 function chooseGuest(reopenProfile){
   authMode = 'guest';
   myProfile = null;
+  try{ localStorage.setItem(AUTH_STORAGE_KEY, 'guest'); }catch(e){}
   document.getElementById('authGate').classList.add('hidden');
   applyAuthUI();
   if(reopenProfile) renderGuestProfile();
 }
+
+// On every load after the very first, skip the gate entirely and restore the remembered choice
+(function restoreAuthMode(){
+  let saved = null;
+  try{ saved = localStorage.getItem(AUTH_STORAGE_KEY); }catch(e){}
+  if(saved === 'telegram' || saved === 'guest'){
+    authMode = saved;
+    document.getElementById('authGate').classList.add('hidden');
+    applyAuthUI();
+  }
+})();
 
 async function loadStore(){
   try{
@@ -171,6 +186,7 @@ function renderGuestProfile(){
 }
 function switchToTelegramFromGuest(){
   authMode = 'telegram';
+  try{ localStorage.setItem(AUTH_STORAGE_KEY, 'telegram'); }catch(e){}
   applyAuthUI();
   loginWithTelegram();
 }
