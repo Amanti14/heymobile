@@ -46,6 +46,9 @@
   .auth-btn-primary{background:var(--primary);color:#fff;}
   .auth-btn-secondary{background:var(--surface);color:var(--text);border:1.5px solid var(--border);}
 
+  .auth-gate{position:fixed;inset:0;background:#fff;z-index:300;display:flex;align-items:center;justify-content:center;}
+  .auth-gate.hidden{display:none;}
+
   .profile-body{margin-top:-40px;padding:0 16px 100px;position:relative;z-index:1;}
   .tier-badge{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;margin-bottom:14px;}
   .tier-bronze{background:#F3E3D3;color:#8A5A2B;}
