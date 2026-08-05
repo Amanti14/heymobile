@@ -10,16 +10,27 @@
 </head>
 <body>
 
-<!-- Auth gate: shown once when the mini app first loads -->
-<div class="auth-gate" id="authGate">
-  <div class="auth-choice">
-    <div class="auth-icon">👤</div>
-    <h3>Welcome to hEY! Market</h3>
-    <p>Log in with Telegram to see your orders, loyalty tier and saved details — or just browse as a guest.</p>
-    <button class="auth-btn auth-btn-primary" onclick="chooseLoginTelegram()">✈️ Log in with Telegram</button>
-    <button class="auth-btn auth-btn-secondary" onclick="chooseGuest()">Continue as Guest</button>
+<div class="login-gate" id="loginGate">
+  <div class="logo-badge">hEY!</div>
+  <h1>Welcome to hEY! Market</h1>
+  <p>Sign in with Telegram to save your info, track your orders, and get a personal profile — or just browse as a guest.</p>
+  <div class="login-option primary" onclick="chooseLogin('telegram')">
+    <div class="login-option-icon">✈️</div>
+    <div>
+      <div class="login-option-title">Continue with Telegram</div>
+      <div class="login-option-sub">See your orders, save checkout info, earn loyalty status</div>
+    </div>
+  </div>
+  <div class="login-option" onclick="chooseLogin('guest')">
+    <div class="login-option-icon">👤</div>
+    <div>
+      <div class="login-option-title">Continue as Guest</div>
+      <div class="login-option-sub">Browse and shop without a profile</div>
+    </div>
   </div>
 </div>
+
+<div class="guest-banner" id="guestBanner">Browsing as Guest <button onclick="chooseLogin('telegram')">Sign in with Telegram</button></div>
 
 <div class="topbar">
   <div class="logo-badge">hEY!</div>
@@ -84,52 +95,53 @@ let activeCategory = "all";
 let currentProduct = null;
 
 const tgUser = tg?.initDataUnsafe?.user || null;
-let myProfile = null; // populated once the user logs in and opens their profile
-let authMode = null; // 'telegram' | 'guest' — set once, at the auth gate, then remembered forever
+let myProfile = null; // populated by loadProfile()
+let loginMode = localStorage.getItem('hey_login_mode'); // 'telegram' | 'guest' | null (not chosen yet)
 
-const AUTH_STORAGE_KEY = 'heyMarketAuthMode';
+// ---- Login gate: nothing touches the user's Telegram identity until they choose ----
+if(loginMode === 'telegram' || loginMode === 'guest'){
+  document.getElementById('loginGate').style.display = 'none';
+  applyLoginMode();
+  if(loginMode === 'telegram') registerPresence();
+}
+// else: gate stays visible (it's shown by default in the HTML/CSS)
 
-// Reflect the chosen auth mode in the topbar icon: real Telegram avatar if logged in, generic icon if guest
-function applyAuthUI(){
+function chooseLogin(mode){
+  loginMode = mode;
+  localStorage.setItem('hey_login_mode', mode);
+  document.getElementById('loginGate').style.display = 'none';
+  applyLoginMode();
+  closeProfile();
+  if(mode === 'telegram'){
+    registerPresence();
+    syncCartToServer(); // in case they already had items in cart before signing in
+  }
+}
+
+function registerPresence(){
+  if(!tg?.initData) return;
+  fetch(`${API_BASE}/api/my-presence`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ initData: tg.initData })
+  }).catch(()=>{});
+}
+
+function applyLoginMode(){
   const btn = document.getElementById('profileBtn');
-  if(authMode === 'telegram' && tgUser){
-    if(tgUser.photo_url){
+  const banner = document.getElementById('guestBanner');
+  if(loginMode === 'telegram'){
+    banner.classList.remove('show');
+    if(tgUser?.photo_url){
       btn.innerHTML = `<img src="${tgUser.photo_url}" alt="">`;
-    } else if(tgUser.first_name){
+    } else if(tgUser?.first_name){
       btn.textContent = tgUser.first_name[0].toUpperCase();
       btn.style.fontWeight = '800';
     }
   } else {
+    banner.classList.add('show');
     btn.textContent = '👤';
-    btn.style.fontWeight = '';
   }
 }
-
-function chooseLoginTelegram(){
-  authMode = 'telegram';
-  try{ localStorage.setItem(AUTH_STORAGE_KEY, 'telegram'); }catch(e){}
-  document.getElementById('authGate').classList.add('hidden');
-  applyAuthUI();
-}
-function chooseGuest(reopenProfile){
-  authMode = 'guest';
-  myProfile = null;
-  try{ localStorage.setItem(AUTH_STORAGE_KEY, 'guest'); }catch(e){}
-  document.getElementById('authGate').classList.add('hidden');
-  applyAuthUI();
-  if(reopenProfile) renderGuestProfile();
-}
-
-// On every load after the very first, skip the gate entirely and restore the remembered choice
-(function restoreAuthMode(){
-  let saved = null;
-  try{ saved = localStorage.getItem(AUTH_STORAGE_KEY); }catch(e){}
-  if(saved === 'telegram' || saved === 'guest'){
-    authMode = saved;
-    document.getElementById('authGate').classList.add('hidden');
-    applyAuthUI();
-  }
-})();
 
 async function loadStore(){
   try{
@@ -142,15 +154,21 @@ loadStore();
 setInterval(loadStore, 8000); // live sync, matches Vision Sportswear pattern
 
 // ---- Profile ----
-function openProfile(){
+async function openProfile(){
   document.getElementById('profileOverlay').classList.add('open');
-  if(authMode === 'guest') return renderGuestProfile();
-  if(myProfile) return renderProfile();
-  return loginWithTelegram();
-}
-function closeProfile(){ document.getElementById('profileOverlay').classList.remove('open'); }
 
-async function loginWithTelegram(){
+  if(loginMode === 'guest'){
+    document.getElementById('profileContent').innerHTML = `
+      <div style="padding:60px 24px;text-align:center;">
+        <div class="logo-badge" style="width:56px;height:56px;font-size:18px;margin:0 auto 16px;">hEY!</div>
+        <div style="font-size:16px;font-weight:700;margin-bottom:6px;">You're browsing as a guest</div>
+        <p style="font-size:13px;color:var(--text-soft);margin-bottom:22px;">Sign in with Telegram to see your order history, save your info, and unlock loyalty status.</p>
+        <button class="btn-primary" onclick="chooseLogin('telegram')">✈️ Continue with Telegram</button>
+        <button class="icon-btn" style="width:auto;padding:10px 16px;border-radius:14px;margin-top:10px;background:none;color:var(--text-soft);" onclick="closeProfile()">Close</button>
+      </div>`;
+    return;
+  }
+
   document.getElementById('profileContent').innerHTML = `<div style="padding:80px 20px;text-align:center;color:var(--text-soft);">Loading your profile…</div>`;
   try{
     const res = await fetch(`${API_BASE}/api/my-profile`, {
@@ -159,37 +177,16 @@ async function loginWithTelegram(){
     });
     const data = await res.json();
     if(!data.ok){
-      document.getElementById('profileContent').innerHTML = `<div style="padding:70px 20px;text-align:center;color:var(--text-soft);">Open this from inside Telegram to log in.<br><br><button class="auth-btn auth-btn-secondary" style="width:auto;padding:10px 18px;" onclick="chooseGuest(true)">Continue as Guest instead</button></div>`;
+      document.getElementById('profileContent').innerHTML = `<div style="padding:80px 20px;text-align:center;color:var(--text-soft);">Open this from inside Telegram to see your profile.</div>`;
       return;
     }
     myProfile = data;
     renderProfile();
   }catch(e){
-    document.getElementById('profileContent').innerHTML = `<div style="padding:70px 20px;text-align:center;color:var(--text-soft);">Couldn't load your profile — check your connection.<br><br><button class="auth-btn auth-btn-secondary" style="width:auto;padding:10px 18px;" onclick="loginWithTelegram()">Try again</button></div>`;
+    document.getElementById('profileContent').innerHTML = `<div style="padding:80px 20px;text-align:center;color:var(--text-soft);">Couldn't load your profile — check your connection.</div>`;
   }
 }
-
-function renderGuestProfile(){
-  document.getElementById('profileContent').innerHTML = `
-    <div class="profile-hero">
-      <button class="profile-close" onclick="closeProfile()">✕</button>
-      <div class="profile-avatar-wrap">
-        <div class="profile-avatar-ring"><div class="profile-avatar">👤</div></div>
-        <div class="profile-name">Guest</div>
-        <div class="tg-badge">Browsing as guest</div>
-      </div>
-    </div>
-    <div class="profile-body">
-      <div class="empty-orders" style="margin-top:6px;">Log in with Telegram to see your orders, loyalty tier and save your details.</div>
-      <button class="auth-btn auth-btn-primary" style="margin-top:14px;" onclick="switchToTelegramFromGuest()">✈️ Log in with Telegram</button>
-    </div>`;
-}
-function switchToTelegramFromGuest(){
-  authMode = 'telegram';
-  try{ localStorage.setItem(AUTH_STORAGE_KEY, 'telegram'); }catch(e){}
-  applyAuthUI();
-  loginWithTelegram();
-}
+function closeProfile(){ document.getElementById('profileOverlay').classList.remove('open'); }
 
 function loyaltyTier(totalSpent){
   if(totalSpent >= 50000) return { label:'Platinum', cls:'tier-platinum', icon:'💎' };
@@ -395,6 +392,20 @@ function updateCartUI(){
   badge.textContent = count;
   const total = cartTotal();
   document.getElementById('cartSummary').textContent = count>0 ? `${count} item${count>1?'s':''} · ${total} ETB` : 'Cart is empty';
+  syncCartToServer();
+}
+
+// Debounced so rapid qty taps don't spam the worker/KV with writes
+let _cartSyncTimer = null;
+function syncCartToServer(){
+  if(loginMode !== 'telegram' || !tg?.initData) return; // guests' carts are never tracked
+  clearTimeout(_cartSyncTimer);
+  _cartSyncTimer = setTimeout(()=>{
+    fetch(`${API_BASE}/api/my-cart/save`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ initData: tg.initData, cart })
+    }).catch(()=>{});
+  }, 800);
 }
 function cartTotal(){
   return cart.reduce((sum,i)=>{
@@ -449,8 +460,8 @@ function changeCartQty(productId, d){
 let selectedPayment = null;
 async function openCheckout(){
   selectedPayment = store.payment?.methods?.[0]?.id || null;
-  // Lazily fetch saved profile info to prefill the form, without blocking the UI
-  if(!myProfile && tg?.initData && authMode !== 'guest'){
+  // Only prefill from saved profile info if they've actually chosen to sign in
+  if(loginMode === 'telegram' && !myProfile && tg?.initData){
     try{
       const res = await fetch(`${API_BASE}/api/my-profile`, {
         method:'POST', headers:{'Content-Type':'application/json'},
@@ -507,11 +518,13 @@ async function submitOrder(){
       closeSheet();
       showToast('Order placed! We will contact you shortly 🎉');
       tg?.HapticFeedback?.notificationOccurred('success');
-      // Quietly save their info for next time — no need to block or notify on this
-      fetch(`${API_BASE}/api/my-profile/save`, {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ initData: tg?.initData || '', name, phone, notifyOrders: myProfile?.savedInfo?.notifyOrders !== false })
-      }).catch(()=>{});
+      // Quietly save their info for next time — only if they actually signed in
+      if(loginMode === 'telegram'){
+        fetch(`${API_BASE}/api/my-profile/save`, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ initData: tg?.initData || '', name, phone, notifyOrders: myProfile?.savedInfo?.notifyOrders !== false })
+        }).catch(()=>{});
+      }
     } else {
       showToast(data.error || 'Could not place order');
     }
